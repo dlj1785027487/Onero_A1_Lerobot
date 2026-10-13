@@ -99,8 +99,8 @@ def test_native_configs_keep_only_the_documented_differences(config_dir):
         # 原生路径逐臂声明遥操类型，所以顶层不带那个会话级开关。
         assert "reference" not in config["teleop"]
 
-    # 自研路径反过来：一枚会话级开关，映射里不再重复声明。
-    assert session["teleop"]["reference"] == "relative"
+    # 自研路径反过来：一枚会话级开关，映射里不再重复声明（取值随现场，不在此钉死）。
+    assert session["teleop"]["reference"] in ("relative", "absolute")
     for mapping in session["teleop"]["mappings"].values():
         assert "reference" not in mapping
 

@@ -43,6 +43,7 @@
     ],
     "continuous_follow": true,
     "clip_joint_limits": false,
+    "startup_max_delta_rad": 3.0,
     "isolate_can_processes": true,
     "control_cpu_affinity": "auto",
     "velocity_feedforward_scale": [
@@ -57,7 +58,7 @@
   },
   "teleop": {
     "id": "robot_dual_leaders",
-    "reference": "relative",
+    "reference": "absolute",
     "arms": {
       "left": {
         "model": "A1L",

@@ -62,20 +62,26 @@ def _teleop_config(reference, mapping_references, *, mode="joint"):
 
 
 def test_session_configs_declare_the_type_once(config_dir) -> None:
-    """5 份会话配置都必须只用 teleop.reference，不能再逐臂声明。"""
+    """5 份会话配置都只在 teleop.reference 声明类型，不再逐臂声明。
+
+    这里只钉声明位置，不钉取值：现场要试全量时改的就是这个字段，
+    用例不该因为改了它而失败。
+    """
     for name in SESSION_CONFIGS_WITH_SWITCH:
         raw = read_config(config_dir, name)
-        assert raw["teleop"]["reference"] == "relative", name
+        assert raw["teleop"]["reference"] in ("relative", "absolute"), name
         for side, mapping in raw["teleop"]["mappings"].items():
             assert "reference" not in mapping, f"{name}: {side} 仍在逐臂声明 reference"
 
 
 def test_session_configs_load_with_the_declared_type(config_dir) -> None:
     for name in SESSION_CONFIGS_WITH_SWITCH:
+        raw = read_config(config_dir, name)
+        declared = raw["teleop"]["reference"]
         config = load_session_config(config_dir / name)
-        assert config.teleop.reference == "relative", name
+        assert config.teleop.reference == declared, name
         for side, mapping in config.teleop.mappings.items():
-            assert mapping.reference == "relative", f"{name}: {side}"
+            assert mapping.reference == declared, f"{name}: {side}"
 
 
 def test_switch_overrides_every_mapping_without_touching_the_config(config_dir, tmp_path) -> None:
@@ -302,7 +308,9 @@ def test_the_guard_is_scoped_to_the_first_command() -> None:
 
 def test_bootstrap_relative_follow_requires_full_range_mappings(config_dir, tmp_path) -> None:
     raw = read_config(config_dir, "sdk_dual_joint_follow.json")
-    raw["robot"]["bootstrap_relative_follow"] = True  # 仍是 reference=relative
+    # 会话配置的类型可以让现场改成全量，所以这里显式造出"相对映射 + bootstrap"这个场景。
+    raw["teleop"]["reference"] = "relative"
+    raw["robot"]["bootstrap_relative_follow"] = True
     probe = tmp_path / "bootstrap.json"
     probe.write_text(json.dumps(raw), encoding="utf-8")
 
