@@ -1,0 +1,163 @@
+{
+  "robot": {
+    "type": "onero_sdk",
+    "id": "external_dual_followers",
+    "arms": {
+      "left": {
+        "model": "A1L",
+        "backend": "can",
+        "channel": "can2",
+        "mounting": "humanoid_left",
+        "with_gripper": true,
+        "gripper_model": "woan_picker",
+        "gripper_protocol": "onero"
+      },
+      "right": {
+        "model": "A1R",
+        "backend": "can",
+        "channel": "can1",
+        "mounting": "humanoid_right",
+        "with_gripper": true,
+        "gripper_model": "woan_picker",
+        "gripper_protocol": "onero"
+      }
+    },
+    "send_action": true,
+    "control_hz": 200,
+    "max_velocity": [
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0
+    ],
+    "max_acceleration": [
+      80.0,
+      80.0,
+      80.0,
+      80.0,
+      80.0,
+      80.0,
+      80.0
+    ],
+    "continuous_follow": true,
+    "clip_joint_limits": false,
+    "isolate_can_processes": true,
+    "velocity_feedforward_scale": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "bootstrap_relative_follow": true,
+    "cameras": {
+      "left_wrist": {
+        "backend": "usb",
+        "device": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:3:1.0-video-index0",
+        "width": 1600,
+        "height": 1200,
+        "fps": 30,
+        "auto_exposure": false,
+        "exposure_absolute": 200
+      },
+      "right_wrist": {
+        "backend": "usb",
+        "device": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:2:1.0-video-index0",
+        "width": 1600,
+        "height": 1200,
+        "fps": 30,
+        "auto_exposure": false,
+        "exposure_absolute": 200
+      }
+    }
+  },
+  "teleop": {
+    "type": "onero_sdk_teleop",
+    "id": "robot_dual_leaders",
+    "arms": {
+      "left": {
+        "model": "A1L",
+        "backend": "can",
+        "channel": "can4",
+        "mounting": "humanoid_left",
+        "with_gripper": true,
+        "handle_open_code": 29408,
+        "handle_closed_code": 32828
+      },
+      "right": {
+        "model": "A1R",
+        "backend": "can",
+        "channel": "can3",
+        "mounting": "humanoid_right",
+        "with_gripper": true,
+        "handle_open_code": 29385,
+        "handle_closed_code": 32821
+      }
+    },
+    "mappings": {
+      "left": {
+        "source": "left",
+        "mode": "joint",
+        "reference": "absolute",
+        "scale": 1.0,
+        "joint_signs": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "right": {
+        "source": "right",
+        "mode": "joint",
+        "reference": "absolute",
+        "scale": 1.0,
+        "joint_signs": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "damping": 0.3,
+    "isolate_can_processes": true
+  },
+  "dataset": {
+    "repo_id": "local/a1_dual_joint_follow",
+    "single_task": "dual-arm joint following",
+    "root": "./datasets/a1_dual_joint_follow",
+    "fps": 30,
+    "episode_time_s": 60,
+    "reset_time_s": 10,
+    "num_episodes": 10,
+    "video": true,
+    "push_to_hub": false,
+    "num_image_writer_processes": 2,
+    "num_image_writer_threads_per_camera": 1,
+    "rgb_encoder": {
+      "vcodec": "h264",
+      "pix_fmt": "yuv420p",
+      "g": 30,
+      "crf": 23,
+      "preset": "ultrafast",
+      "extra_options": {
+        "tune": "zerolatency",
+        "bf": "0"
+      }
+    }
+  },
+  "play_sounds": false,
+  "display_data": false
+}

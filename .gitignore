@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Generated runtime and validation artifacts
+.run/
+output/
+outputs/
+validation/
+reports/
+checkpoints/
+/datasets/
+
+# This is a reusable library; applications may generate their own lock file.
+uv.lock

@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lerobot_robot_onero_a1"
+version = "0.2.0"
+description = "LeRobot adapter for A1 single and dual arms over direct CAN"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "Onero A1 SDK contributors" }
+]
+keywords = ["lerobot", "can", "robotics", "onero", "a1"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "numpy>=1.24,<2.3",
+]
+
+[project.optional-dependencies]
+camera = ["opencv-python-headless>=4.9,<4.14"]
+sdk = ["onero-sdk[dynamics,python-can]>=0.3,<0.4"]
+sdk-sim = ["onero-sdk[sim]>=0.3,<0.4"]
+# Keep this exact pin: this adapter imports LeRobot APIs
+# whose module paths and dataset contracts can change between releases.
+# Deliberately no python_version marker: with one, pip silently installs nothing
+# on Python < 3.12 (the marker makes the requirement a no-op) and the user only
+# sees a downstream "LeRobotDataset is not available" error. Without it, pip
+# fails with an explicit "requires a different Python" message.
+lerobot = ["lerobot[training,hardware,dataset-viz]==0.6.1"]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.14,<0.15",
+]
+
+[project.scripts]
+onero-a1-print-observation = "onero_a1_lerobot.cli.print_observation:main"
+onero-a1-record-episode = "onero_a1_lerobot.cli.record_episode:main"
+onero-a1-replay-episode = "onero_a1_lerobot.cli.replay_episode:main"
+onero-a1-lerobot-record = "onero_a1_lerobot.cli.lerobot_record:main"
+onero-a1-lerobot-rollout = "onero_a1_lerobot.cli.lerobot_rollout:main"
+onero-a1-lerobot-teleoperate = "onero_a1_lerobot.cli.lerobot_teleoperate:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/onero_a1_lerobot", "src/lerobot_robot_onero_a1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+# The robot ships ROS 2 Jazzy, whose launch-testing plugins register themselves
+# as pytest11 entry points and fail to import inside this project's venv. They
+# are irrelevant here; ``-p no:`` is a no-op when they are absent.
+addopts = "-p no:launch_testing -p no:launch_ros"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
