@@ -33,6 +33,7 @@ SDK 在其他位置时，用 `A1_ARM_SDK_PATH` 指定。每次新开终端先激
 - `teleop.arms`：主臂；`robot.arms`：从臂。每条机械臂使用独立通道。
 - `channel`：SocketCAN 接口名或 SLCAN 的 `/dev/serial/by-id/...` 路径。串口直连时不要同时运行 `slcand`。
 - `robot.cameras`：相机设备路径、分辨率和帧率。建议使用稳定的 `/dev/v4l/by-path/...` 路径。
+- `teleop.reference`：整场遥操类型。`"relative"`（现有配置）让从臂停在自己启动时的位姿、只复现主臂位移；`"absolute"` 把主臂自身位姿逐关节交给从臂。改这一个字段即可切换全部映射，原生配置则逐臂声明。
 
 CAN 接口设置见[详细用法](docs/usage_sdk_follow.md)。示例配置中的设备路径需要按部署机器修改。
 
@@ -44,6 +45,10 @@ onero-a1-lerobot-teleoperate \
 ```
 
 只需模拟运行时，加 `--simulate --duration 5`，不会连接机械臂或 USB 相机。
+
+全量遥操（`"reference": "absolute"`）要求 `scale=1`、`joint_signs` 在真机核对，且启动时从臂与
+主臂的每个关节都在 `robot.startup_max_delta_rad`（默认 0.15 rad）以内——第一条指令就是主臂
+位姿，程序不会替你对齐。见[详细用法](docs/usage_sdk_follow.md)第 3 节。
 
 同一套双臂遥操与录制也可以用 LeRobot 原生 CLI 触发：
 

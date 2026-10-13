@@ -118,21 +118,33 @@ class OneroSdkTeleop(Teleoperator):
             for name, d in self.devices.items()
         }
         for side, mapper in self.mappers.items():
+            leader = states[mapper.config.source].joints
             follower = [observation[k] for k in arm_position_keys(side)]
-            mapper.capture(
-                states[mapper.config.source].joints,
-                follower,
-            )
-            logger.info(
-                "Mapping %s -> %s: mode=%s reference=%s scale=%g; leader_ref=%s follower_ref=%s rad",
-                mapper.config.source,
-                side,
-                mapper.config.mode,
-                mapper.config.reference,
-                mapper.config.scale,
-                [round(q, 4) for q in states[mapper.config.source].joints],
-                [round(q, 4) for q in follower],
-            )
+            # Captured for every mapping; only the relative one reads it back.
+            mapper.capture(leader, follower)
+            if mapper.config.reference == "relative":
+                logger.info(
+                    "Mapping %s -> %s: mode=%s reference=relative scale=%g; copying the "
+                    "leader's movement from leader_ref=%s follower_ref=%s rad",
+                    mapper.config.source,
+                    side,
+                    mapper.config.mode,
+                    mapper.config.scale,
+                    [round(q, 4) for q in leader],
+                    [round(q, 4) for q in follower],
+                )
+            else:
+                logger.info(
+                    "Mapping %s -> %s: mode=%s reference=absolute scale=%g offset=%s; every "
+                    "joint is driven to the leader's own angle (leader=%s rad), so the "
+                    "follower must already be within robot.startup_max_delta_rad of it",
+                    mapper.config.source,
+                    side,
+                    mapper.config.mode,
+                    mapper.config.scale,
+                    [round(q, 4) for q in mapper.config.offset],
+                    [round(q, 4) for q in leader],
+                )
 
     def get_action(self) -> dict[str, float]:
         if not self.is_connected:

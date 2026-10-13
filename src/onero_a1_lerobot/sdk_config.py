@@ -114,6 +114,21 @@ class OneroSdkConfig(RobotConfig):
 class OneroSdkTeleopConfig(TeleoperatorConfig):
     arms: dict[str, SdkArmConfig] = field(default_factory=dict)
     mappings: dict[str, ArmMappingConfig] = field(default_factory=dict)
+    # Teleoperation type: one switch for every mapping of the session.
+    #   "relative" (增量): the follower keeps the pose it has when the session
+    #       starts and reproduces only the leader's movement, in radians.
+    #   "absolute" (全量): every joint is commanded to the leader's own angle
+    #       (scale * signs * q_leader + offset), so the follower is driven to the
+    #       leader's pose from the first frame -- a hand-over of the pose, not a
+    #       movement. The follower must therefore already be within
+    #       robot.startup_max_delta_rad of the leader when the session starts, and
+    #       a positive scale cannot be used in joint mode because it would shift
+    #       the follower's zero point (use the seven-value offset instead).
+    # ``None`` leaves every mapping at whatever it declares, which is what a
+    # mixed setup needs (one arm full-range, another incremental). When set, it
+    # overrides each mapping, in this project's CLI and in the native LeRobot
+    # CLIs alike, so switching the teleoperation type only touches this one field.
+    reference: str | None = None
     damping: float = 0.3
     stale_state_s: float = 0.25
     isolate_can_processes: bool = False
@@ -121,12 +136,19 @@ class OneroSdkTeleopConfig(TeleoperatorConfig):
     def validate(self) -> None:
         if not isinstance(self.isolate_can_processes, bool):
             raise ValueError("isolate_can_processes must be a boolean")
+        if self.reference is not None and self.reference not in ("relative", "absolute"):
+            raise ValueError("teleop reference must be relative or absolute")
         if not self.arms:
             raise ValueError("Configure at least one leader arm")
         ordered_sides(self.mappings)
         validate_channels(self.arms)
         sources = []
         for mapping in self.mappings.values():
+            if self.reference is not None:
+                # Applied before the mapping validates itself, so an override that
+                # cannot hold (a relative mapping that carries an offset) is
+                # rejected here instead of at the first control tick.
+                mapping.reference = self.reference
             mapping.__post_init__()
             if mapping.source not in self.arms:
                 raise ValueError(f"Unknown leader source: {mapping.source}")

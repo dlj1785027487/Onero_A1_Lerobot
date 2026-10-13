@@ -171,6 +171,10 @@ class SdkArmConfig:
 class ArmMappingConfig:
     source: str = "left"
     mode: str = "mirror"
+    # How the follower is driven from the leader. "absolute" is the full-range
+    # (全量) hand-over of the leader's own pose, "relative" is the incremental
+    # (增量) copy of the leader's movement from where the follower started;
+    # OneroSdkTeleopConfig.reference overrides this for every mapping at once.
     reference: str = "absolute"
     scale: float = 1.0
     offset: tuple[float, ...] = (0.0,) * 7
@@ -189,6 +193,17 @@ class ArmMappingConfig:
         if self.reference not in ("absolute", "relative"):
             raise ValueError("reference must be absolute or relative")
         positive(self.scale, "mapping.scale")
+        if self.reference == "absolute" and self.mode == "joint" and self.scale != 1.0:
+            # factor * q_leader multiplies the leader's own joint angle, which
+            # moves the follower's zero rather than its range, so the result is a
+            # pose nobody asked for. A zero or mounting difference belongs in the
+            # offset; only a real range difference would need a scale, and that is
+            # not expressible as an absolute joint target.
+            raise ValueError(
+                "absolute joint mapping multiplies the leader's own angle by scale, which "
+                "shifts the follower's zero point; keep scale=1 and express a zero "
+                "difference with the seven-value offset"
+            )
         if len(self.offset) != 7 or not all(math.isfinite(v) for v in self.offset):
             raise ValueError("mapping.offset must contain seven finite radians")
         if self.reference == "relative" and any(self.offset):

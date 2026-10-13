@@ -331,14 +331,23 @@ class OneroSdk(Robot):
                 # follower is deliberately held while the leader keeps moving, so
                 # distance guards must not fire (they used to latch a tracking
                 # error after the leader moved max_tracking_error_rad away).
-                if (
-                    self.config.send_action
-                    and self._first_send
-                    and np.max(abs(target - measured)) > self.config.startup_max_delta_rad
-                ):
-                    raise RuntimeError(
-                        "Initial target is too far from the follower; use relative mapping or align first"
-                    )
+                if self.config.send_action and self._first_send:
+                    first_delta = np.abs(target - measured)
+                    if np.max(first_delta) > self.config.startup_max_delta_rad:
+                        over = np.flatnonzero(first_delta > self.config.startup_max_delta_rad)
+                        details = "; ".join(
+                            f"J{i + 1} target={target[i]:+.4f} follower={measured[i]:+.4f} "
+                            f"delta={target[i] - measured[i]:+.4f}"
+                            for i in over
+                        )
+                        raise RuntimeError(
+                            f"{side} ({self.config.arms[side].model}) first target is too far "
+                            f"from the follower: {details} rad, limit "
+                            f"{self.config.startup_max_delta_rad:.4f} rad. Full-range (absolute) "
+                            "mapping commands the leader's own pose, so pose the follower within "
+                            "the limit before starting, use incremental (relative) mapping, or "
+                            "raise startup_max_delta_rad to let the limiter slew to the leader"
+                        )
                 if (
                     self.config.send_action
                     and not self._first_send

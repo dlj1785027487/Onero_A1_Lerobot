@@ -62,7 +62,11 @@ class ArmMapper:
         factor = self.config.scale * signs
         if self.config.reference == "relative":
             if self._leader_ref is None or self._follower_ref is None:
-                raise RuntimeError("Relative mapping requires prepare() in a shared SDK session")
+                raise RuntimeError(
+                    "Relative (incremental) mapping requires prepare() in a shared SDK session; "
+                    "the native lerobot-teleoperate / lerobot-record CLIs never call it, so they "
+                    "need reference='absolute' together with robot.bootstrap_relative_follow"
+                )
             return self._follower_ref + factor * (q - self._leader_ref)
         return factor * q + np.asarray(self.config.offset)
 

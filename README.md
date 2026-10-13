@@ -33,6 +33,7 @@ Update the configuration to match your wiring:
 - `teleop.arms`: leaders; `robot.arms`: followers. Each physical arm needs its own channel.
 - `channel`: a SocketCAN interface or SLCAN `/dev/serial/by-id/...` path. Do not run `slcand` on a port used for direct SLCAN.
 - `robot.cameras`: camera paths, resolution and frame rate. Prefer stable `/dev/v4l/by-path/...` paths.
+- `teleop.reference`: teleoperation type for the whole session. `"relative"` (what the shipped configs use) keeps the follower in the pose it starts in and copies the leader's movement; `"absolute"` hands the leader's own pose to the follower, joint by joint. One field switches every mapping; the native configs declare it per arm instead.
 
 See [detailed usage](docs/usage_sdk_follow.md) for CAN setup. Device paths in the examples must be adapted to the deployment computer.
 
@@ -44,6 +45,11 @@ onero-a1-lerobot-teleoperate \
 ```
 
 Add `--simulate --duration 5` for a mock session without opening arms or USB cameras.
+
+Full-range (`"reference": "absolute"`) teleoperation needs `scale=1`, a `joint_signs` table checked on
+the machine, and the follower already within `robot.startup_max_delta_rad` (0.15 rad by default) of the
+leader when the session starts: the first command is the leader's own pose, and the program never
+aligns the arms for you. See section 3 of the [detailed usage](docs/usage_sdk_follow.md).
 
 The same dual-arm following and recording also run under LeRobot's own CLIs:
 

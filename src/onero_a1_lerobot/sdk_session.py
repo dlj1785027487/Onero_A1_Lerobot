@@ -99,6 +99,21 @@ class SdkSessionConfig:
                     f"leader={leader.gripper_channel}); the follower gripper action is driven "
                     "by the leader's opening reading, so enable it on both arms or neither"
                 )
+        if self.robot.bootstrap_relative_follow:
+            # The bootstrap turns absolute targets into follower-relative motion so
+            # the native LeRobot CLIs can follow without prepare(). A relative
+            # mapping already submits a follower-relative target and needs the
+            # references prepare() captures, which those CLIs never call, so the
+            # two must not be combined on any arm of the session.
+            relative = sorted(
+                side for side, mapping in self.teleop.mappings.items()
+                if mapping.reference != "absolute"
+            )
+            if relative:
+                raise ValueError(
+                    "bootstrap_relative_follow requires reference='absolute' on every mapping; "
+                    f"{', '.join(relative)} is not absolute"
+                )
 
 
 def _unique_object(pairs):

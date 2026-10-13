@@ -57,6 +57,7 @@
   },
   "teleop": {
     "id": "robot_dual_leaders",
+    "reference": "relative",
     "arms": {
       "left": {
         "model": "A1L",
@@ -81,7 +82,6 @@
       "left": {
         "source": "left",
         "mode": "joint",
-        "reference": "relative",
         "scale": 1.0,
         "joint_signs": [
           1,
@@ -96,7 +96,6 @@
       "right": {
         "source": "right",
         "mode": "joint",
-        "reference": "relative",
         "scale": 1.0,
         "joint_signs": [
           1,

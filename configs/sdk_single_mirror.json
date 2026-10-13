@@ -48,6 +48,7 @@
   },
   "teleop": {
     "id": "a1_leader",
+    "reference": "relative",
     "arms": {
       "left": {
         "model": "A1L",
@@ -63,7 +64,6 @@
       "right": {
         "source": "left",
         "mode": "mirror",
-        "reference": "relative",
         "scale": 1.0
       }
     },

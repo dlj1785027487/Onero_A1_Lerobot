@@ -8,7 +8,9 @@
   ``tune=zerolatency``、``bf=0``）。
 
 两份配置的机械臂接线、相机和编码参数必须逐项相同；只有已写入
-``docs/usage_sdk_follow.md`` 的三处结构性差异允许保留。
+``docs/usage_sdk_follow.md`` 的四处结构性差异允许保留：``type`` 字段、遥操类型的声明位置
+（自研路径用会话级 ``teleop.reference``，原生路径逐臂写 ``reference``）、
+``robot.bootstrap_relative_follow``，以及录制配置的 ``dataset`` 段。
 """
 
 from __future__ import annotations
@@ -83,9 +85,10 @@ def test_native_and_session_configs_share_robot_wiring(config_dir):
 
 
 def test_native_configs_keep_only_the_documented_differences(config_dir):
-    """原生路径的三处结构性差异，改动时必须同步文档。"""
+    """原生路径的四处结构性差异，改动时必须同步文档。"""
     native = read_config(config_dir, NATIVE_RECORD)
     teleop = read_config(config_dir, NATIVE_TELEOP)
+    session = read_config(config_dir, SESSION_CAMERAS)
 
     for config in (native, teleop):
         assert config["robot"]["type"] == "onero_sdk"
@@ -93,6 +96,13 @@ def test_native_configs_keep_only_the_documented_differences(config_dir):
         assert config["robot"]["bootstrap_relative_follow"] is True
         assert config["teleop"]["mappings"]["left"]["reference"] == "absolute"
         assert config["teleop"]["mappings"]["right"]["reference"] == "absolute"
+        # 原生路径逐臂声明遥操类型，所以顶层不带那个会话级开关。
+        assert "reference" not in config["teleop"]
+
+    # 自研路径反过来：一枚会话级开关，映射里不再重复声明。
+    assert session["teleop"]["reference"] == "relative"
+    for mapping in session["teleop"]["mappings"].values():
+        assert "reference" not in mapping
 
     # 原生 teleoperate 配置不含 dataset；原生 record 配置必须含 dataset 段。
     assert "dataset" not in teleop

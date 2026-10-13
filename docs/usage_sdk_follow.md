@@ -6,6 +6,8 @@ LeRobot 设备类型为 `onero_sdk` / `onero_sdk_teleop`，Python 包为 `onero_
 可选 USB 相机直接接入部署电脑，图像采集与 CAN 跟随独立运行。
 
 提供 `mirror` 镜像和 `joint` 逐关节映射，每条臂有七个关节位置目标。
+遥操类型由 `teleop.reference` 一处切换：`relative` 增量（从臂保持起始位姿，只复现主臂位移）、
+`absolute` 全量（每个关节直接复现主臂自身角度），见第 3 节。
 CAN 真机且 `with_gripper=true` 时，同时启用夹爪控制与 `{side}_arm.gripper.pos` 特征，
 范围为 0~1，1 为张开；主臂夹爪开合度传给从臂并进入录制数据。
 无夹爪时单臂/双臂为 7/14 维，两臂均启用夹爪时为 8/16 维；mock/mujoco 不含夹爪特征。
@@ -343,7 +345,57 @@ SDK 急停可能先失能电机再通知应用；已经失能的臂无法保位�
 通信中断、驱动故障、掉电或底层 I/O 卡死时仍有支撑力。
 `q`、Ctrl+C、SIGTERM、窗口关闭和显式 `--duration` 到期仍会请求失能，退出前须支撑机械臂。
 
-## 3. 相对跟随与配置扩展
+## 3. 遥操类型、相对跟随与配置扩展
+
+### 遥操类型开关（增量 / 全量）
+
+遥操类型写在会话配置的 `teleop` 段，一个字段同时作用于本次会话的所有 mapping：
+
+```json
+"teleop": {
+  "reference": "relative",
+  "arms": { "...": "..." },
+  "mappings": { "...": "..." }
+}
+```
+
+- `"relative"`（增量）：会话开始时记录主从**双方**的实际角度，之后只复现主臂的位移。
+  从臂的起点由它自己决定，启动时两臂位姿不必相同：
+
+  ```text
+  q_follower = q_follower_start + scale × signs × (q_leader − q_leader_start)
+  ```
+
+- `"absolute"`（全量）：每个关节直接复现主臂**自身**的角度，等于把主臂的位姿整体交给从臂：
+
+  ```text
+  q_follower = scale × signs × q_leader + offset
+  ```
+
+省略该字段时，每条 mapping 保持自己在 `teleop.mappings.<side>.reference` 里声明的值，
+混合配置（一条臂全量、另一条增量）用这种写法。显式写出该字段时它覆盖所有 mapping——
+于是"同一个启动命令、只改配置文件"即可切换全量/增量，自研 CLI 与原生
+`lerobot-teleoperate` / `lerobot-record` 两条路径行为一致（两处都在
+`OneroSdkTeleopConfig.validate()` 应用）。五份会话配置都显式写了这个字段，
+因此改它一处就能整场切换，配置里也看不到被覆盖的逐臂 `reference`。
+
+全量的三个前提，缺一不可：
+
+1. **`scale` 必须是 1。** 全量下 `scale` 乘的是主臂自己的关节角，改变的是从臂**零点**而不是
+   行程，结果是一组没人要的位姿；`mode="joint"` 时该组合在加载期直接报错。
+   主从零点或安装差异请写进七维 `offset`。
+2. **`mode="joint"` 的 `joint_signs` 必须现场核对。** 方向表由主从型号与安装方式决定，
+   全量下它作用在绝对角上，不能直接沿用增量时标定出的那张表；先按下面的肩部参考姿态核对方向，
+   再低速试运行。
+3. **启动时从臂必须已经在主臂附近。** 全量的第一条指令就是主臂当前位姿，所以
+   `robot.startup_max_delta_rad`（默认 0.15 rad ≈ 8.6°）会逐关节比较首帧目标与从臂实际角度：
+   超限即拒绝跟随、锁存故障并保位，报错里逐个列出超限关节的 `target` / `follower` / `delta`。
+   程序**不自动对齐**。要么先把从臂手动摆到该阈值内再启动，要么显式调大
+   `startup_max_delta_rad`，让限幅器把从臂拉过去（那会真的动臂，仍受 `max_velocity` /
+   `max_acceleration` 约束）。
+
+首帧保护只在第一条指令生效，之后由 `robot.max_tracking_error_rad` 负责跟踪误差保护。
+暂停恢复时全量不需要重建参考，增量会重新捕获。
 
 ### 可选的关节位置裁剪
 
@@ -372,11 +424,18 @@ q_right[i] = q_right_start[i] + joint_signs[i] × scale × (q_left[i] - q_left_s
 ```
 
 ```json
-"right": {
-  "source": "left", "mode": "joint", "reference": "relative", "scale": 1.0,
-  "joint_signs": [-1, 1, 1, -1, 1, -1, 1]
+"teleop": {
+  "reference": "relative",
+  "mappings": {
+    "right": {
+      "source": "left", "mode": "joint", "scale": 1.0,
+      "joint_signs": [-1, 1, 1, -1, 1, -1, 1]
+    }
+  }
 }
 ```
+
+遥操类型不写在这里：它由 `teleop.reference` 统一给出（上例是增量）。
 
 该方向表根据 SDK A1L/A1R 模型的标准肩部参考姿态核对：J1、J4、J6 反号，
 J2、J3、J5、J7 同号。不同安装或关节顺序不能直接套用该表；型号和 mounting 仍填写实际装配。
@@ -430,9 +489,9 @@ J2、J3、J5、J7 同号。不同安装或关节顺序不能直接套用该表�
 q_target = q_follower_start - scale × (q_leader - q_leader_start)
 ```
 
-两种映射都支持 `reference="relative"`：首帧保持从臂当前位置，暂停恢复时重新捕获参考。
-也支持 `reference="absolute"` 和七维 `offset`；初始目标与从臂差值超过
-`startup_max_delta_rad` 时拒绝跟随，不自动执行对齐运动。
+两种映射（`mirror` 与 `joint`）都支持 `reference="relative"`：首帧保持从臂当前位置，
+暂停恢复时重新捕获参考；也都支持 `reference="absolute"` 和七维 `offset`——全量的前提与
+启动保护见本节开头的"遥操类型开关"。
 位置伺服增益使用 SDK 模型默认值。镜像配置的控制参数已与逐关节配置同步：
 200 Hz、每关节 3 rad/s、80 rad/s²、`continuous_follow=true`，仅 J5–J7 关闭速度前馈；
 映射仍为七个关节增量全部取反。
@@ -460,13 +519,14 @@ onero-a1-lerobot-teleoperate --session-config configs/sdk_dual_joint_follow.json
 可用 `joint` 模式配合七个 `+1`：
 
 ```json
+"reference": "relative",
 "mappings": {
   "left": {
-    "source": "left", "mode": "joint", "reference": "relative",
+    "source": "left", "mode": "joint",
     "joint_signs": [1, 1, 1, 1, 1, 1, 1]
   },
   "right": {
-    "source": "right", "mode": "joint", "reference": "relative",
+    "source": "right", "mode": "joint",
     "joint_signs": [1, 1, 1, 1, 1, 1, 1]
   }
 }
@@ -716,9 +776,15 @@ lerobot-teleoperate --config_path=configs/native_dual_joint_follow_teleoperate.j
 lerobot-record --config_path=configs/native_dual_joint_follow_record.json
 ```
 
-相对会话配置只有三处差异，都是原生路径的要求：多一层 `"type": "onero_sdk"` /
-`"type": "onero_sdk_teleop"`（draccus 用它选择设备类）；`teleop.mappings` 的
-`reference` 为 `"absolute"`；`robot.bootstrap_relative_follow` 为 `true`。
+相对会话配置只有四处结构性差异，都是原生路径的要求：
+
+1. 多一层 `"type": "onero_sdk"` / `"type": "onero_sdk_teleop"`（draccus 用它选择设备类）。
+2. 遥操类型不写会话级的 `teleop.reference`，而是逐条臂在 `teleop.mappings.<side>.reference`
+   写 `"absolute"`。原生路径读的是同一份 `OneroSdkTeleopConfig`，会话级开关同样生效，
+   但逐臂写法把"原生必须全量"这条依赖写在依赖它的那一层。
+3. `robot.bootstrap_relative_follow` 为 `true`。
+4. 录制配置多一个 `dataset` 段（见下表与后文）。
+
 视频编码参数不构成差异：`dataset.rgb_encoder` 已与会话配置的 H.264 参数对齐。
 
 **唯一阻塞点与两条路径。** 原生 CLI 自己构造 teleop 和 robot，流程是
@@ -726,12 +792,14 @@ lerobot-record --config_path=configs/native_dual_joint_follow_record.json
 `robot.send_action()`，**从不调用 `OneroSdkTeleop.prepare()`**
 （`Teleoperator` 基类里也没有这个方法）。`ArmMapper` 因此拿不到主从参考，
 `reference="relative"` 会在第一帧抛
-`Relative mapping requires prepare() in a shared SDK session`。
+`Relative (incremental) mapping requires prepare() in a shared SDK session; ...`，
+报文里同时给出改法（改成 `reference="absolute"` 并配合 `bootstrap_relative_follow`）。
+会话配置里把 `bootstrap_relative_follow` 与相对映射写在一起，会在加载期就被拦下。
 
 - **A（零代码改动）**：`reference="absolute"`（`scale=1`、`offset=0` 时目标就是主臂
-  反馈角）。从臂第一步会直接跳到主臂当前姿态，所以必须在启动前用手把主臂摆到与从臂相差
-  `startup_max_delta_rad`（默认 0.15 rad）以内，否则首个动作被
-  `Initial target is too far from the follower` 拦下。加
+  反馈角）。从臂第一步会直接跳到主臂当前姿态，所以必须在启动前把主臂摆到与从臂相差
+  `startup_max_delta_rad`（默认 0.15 rad）以内，否则首个动作被首帧保护拦下，报文里逐个
+  列出超限关节的 `target` / `follower` / `delta`。加
   `--robot.bootstrap_relative_follow=false` 可复现这条路径。
 - **B（默认，推荐）**：`bootstrap_relative_follow=true` 时，`OneroSdk` 在 `prepare()`
   之后的第一个动作上锁存「从臂当时实测位置 q0」和「该帧目标 first_target」，之后把每个
@@ -742,9 +810,10 @@ lerobot-record --config_path=configs/native_dual_joint_follow_record.json
 
 该开关只改写关节位置；夹爪开合度是主臂的绝对读数，原样传递。锁存值在 `prepare()` 和断开
 时清空，因此连接、暂停恢复、仿真切回手动都会重新锁存，语义与 relative 映射重新捕获参考
-一致；若被误写进会话配置（`--session-config` 且仍用 relative），首帧目标本身就等于从臂
-参考位置，改写退化为恒等。默认值为 `false`：策略 rollout 与数据集回放提交的是绝对目标，
-不能被平移。
+一致。把它与相对映射同时写进会话配置会在**加载期**被拒绝
+（`bootstrap_relative_follow requires reference='absolute' on every mapping`）：
+相对映射自己就提交从臂相对目标，且依赖 `prepare()` 捕获的参考，两者组合没有意义。
+默认值为 `false`：策略 rollout 与数据集回放提交的是绝对目标，不能被平移。
 
 确定性等价验证（本机 mock、固定 5 ms 假时钟、同一主臂轨迹、80 帧）：relative 映射的目标
 与 B 改写后的目标逐帧相同，下发到从臂的命令也逐帧相同（差值 0），从臂实际位移等于主臂位移
@@ -809,8 +878,9 @@ onero-a1-print-observation --session-config configs/sdk_left_leader_right_follow
 
 ## 6. 无硬件测试与 CAN 预检
 
-仓库自带一套不需要 CAN、USB 相机或 SDK 服务的用例，覆盖配置加载、两套录制路径的编码一致性、
-会话配置接线，以及 `can_precheck` 的参数行为。先准备好 venv（含 `dev` extra）：
+仓库自带一套不需要 CAN、USB 相机或 SDK 服务的用例，覆盖配置加载、遥操类型开关与全量/增量映射
+数学、启动首帧保护与报错内容、两套录制路径的编码一致性、会话配置接线，以及 `can_precheck`
+的参数行为。先准备好 venv（含 `dev` extra）：
 
 ```bash
 bash scripts/setup.sh
@@ -845,7 +915,8 @@ python scripts/can_precheck.py --watch 10 /dev/ttyACM4 /dev/ttyACM5
 
 ## 7. 验证范围和边界
 
-- 此前双视频数据集验证不覆盖本次原始图像落盘和录制后生成流程。本次已加入免硬件用例并在 mock 下跑通（见第 6 节）：覆盖配置加载、两套录制路径的编码一致性、`can_precheck` 参数与 CLI 解析；真机的图像落盘与吞吐、CAN 异常和故障行为仍需部署方测量。
+- 此前双视频数据集验证不覆盖本次原始图像落盘和录制后生成流程。本次已加入免硬件用例并在 mock 下跑通（见第 6 节）：覆盖配置加载、遥操类型开关与全量/增量映射数学、首帧保护的判定与报错、两套录制路径的编码一致性、`can_precheck` 参数与 CLI 解析；真机的图像落盘与吞吐、CAN 异常和故障行为仍需部署方测量。
+- 全量（`teleop.reference="absolute"`）的开关优先级、映射数学与启动保护有免硬件用例覆盖；`joint_signs`、`offset` 的现场取值与"从臂先就位"的可达性没有真机验收，首次使用必须低速、空载、留足运动空间试运行。
 - `--simulate` 会替换相机为 mock，并清空 V4L2 曝光项；MuJoCo 模式的相机图像同样为合成图像，不表示渲染视角或真实摄像头画面。
 
 - 内存模拟不测试 CAN 延迟、真实关节限位或动力学；模型限位在实际 SDK 路径中读取。
