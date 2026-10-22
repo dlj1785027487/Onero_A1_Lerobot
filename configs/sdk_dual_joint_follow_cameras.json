@@ -5,7 +5,7 @@
       "left": {
         "model": "A1L",
         "backend": "can",
-        "channel": "can2",
+        "channel": "can3",
         "mounting": "humanoid_left",
         "with_gripper": true,
         "gripper_model": "woan_picker",
@@ -14,7 +14,7 @@
       "right": {
         "model": "A1R",
         "backend": "can",
-        "channel": "can1",
+        "channel": "can4",
         "mounting": "humanoid_right",
         "with_gripper": true,
         "gripper_model": "woan_picker",
@@ -58,18 +58,18 @@
     "cameras": {
       "left_wrist": {
         "backend": "usb",
-        "device": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:3:1.0-video-index0",
-        "width": 1600,
-        "height": 1200,
+        "device": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:2:1.0-video-index0",
+        "width": 640,
+        "height": 480,
         "fps": 30,
         "auto_exposure": false,
         "exposure_absolute": 200
       },
       "right_wrist": {
         "backend": "usb",
-        "device": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:2:1.0-video-index0",
-        "width": 1600,
-        "height": 1200,
+        "device": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:3:1.0-video-index0",
+        "width": 640,
+        "height": 480,
         "fps": 30,
         "auto_exposure": false,
         "exposure_absolute": 200
@@ -78,12 +78,12 @@
   },
   "teleop": {
     "id": "robot_dual_leaders",
-    "reference": "absolute",
+    "reference": "relative",
     "arms": {
       "left": {
         "model": "A1L",
         "backend": "can",
-        "channel": "can4",
+        "channel": "can1",
         "mounting": "humanoid_left",
         "with_gripper": true,
         "handle_open_code": 29408,
@@ -92,7 +92,7 @@
       "right": {
         "model": "A1R",
         "backend": "can",
-        "channel": "can3",
+        "channel": "can2",
         "mounting": "humanoid_right",
         "with_gripper": true,
         "handle_open_code": 29385,

@@ -12,6 +12,10 @@ class SdkSimulationWindow:
         self._model, self._data = model, data
         self._window = self._context = None
         self._texts = None
+        # mujoco 3.12 dropped the MjvScene parameter from mjv_moveCamera; older
+        # releases take it between the mouse deltas and the camera. Detect it
+        # once here so a mouse drag never raises from inside a GLFW callback.
+        self._move_camera_takes_scene = "MjvScene" in (mujoco.mjv_moveCamera.__doc__ or "")
         if not glfw.init():
             raise RuntimeError("Cannot initialize the simulation desktop window")
         try:
@@ -48,6 +52,10 @@ class SdkSimulationWindow:
     def set_texts(self, texts):
         self._texts = texts
 
+    def _move_camera(self, action, reldx, reldy):
+        scene = (self._scene,) if self._move_camera_takes_scene else ()
+        self._mj.mjv_moveCamera(self._model, action, reldx, reldy, *scene, self.cam)
+
     def _mouse_move(self, window, x, y):
         glfw, mj = self._glfw, self._mj
         dx, dy = x - self._cursor[0], y - self._cursor[1]
@@ -62,12 +70,10 @@ class SdkSimulationWindow:
             action = mj.mjtMouse.mjMOUSE_ZOOM
         else:
             return
-        mj.mjv_moveCamera(self._model, action, dx / height, dy / height, self._scene, self.cam)
+        self._move_camera(action, dx / height, dy / height)
 
     def _scroll(self, window, xoffset, yoffset):
-        self._mj.mjv_moveCamera(
-            self._model, self._mj.mjtMouse.mjMOUSE_ZOOM, 0, -0.05 * yoffset, self._scene, self.cam,
-        )
+        self._move_camera(self._mj.mjtMouse.mjMOUSE_ZOOM, 0, -0.05 * yoffset)
 
     def sync(self):
         if not self.is_running():

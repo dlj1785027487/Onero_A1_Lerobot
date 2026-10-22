@@ -1,12 +1,18 @@
-"""``SdkDevice.gripper_command`` 的故障路径测试：不连接 CAN、不启动 SDK。
+"""夹爪通道的两类离线测试：CAN 命令的故障路径，以及 mock 端点。
 
-真机现象：SDK 的 ``OneroGripper`` 用每一帧反馈的 status 半字节重算 ``_enabled``
+CAN 故障路径：SDK 的 ``OneroGripper`` 用每一帧反馈的 status 半字节重算 ``_enabled``
 （``armsdk/onero_sdk/grippers.py`` 的 ``_apply_feedback``），所以一帧异常反馈就能让
 一个健康的电机被判成"未使能"，随后的一条位置帧被拒绝，在适配器里升级成 following
 fault。这里用替身把该协议行为固定下来，避免以后改动把它退化回去。
+
+mock 端点：``--simulate`` 必须暴露与会话配置完全一致的特征，因此 ``backend=mock`` 的
+从臂同样带夹爪通道（MuJoCo 不带，它的末端属于 SDK 仿真）。从臂的读数跟随最后一条命令，
+主臂保持只读并在 ``mock_motion`` 下自己扫动，让镜像通路无需人手即可跑起来。
 """
 
 from __future__ import annotations
+
+import time
 
 import pytest
 
@@ -103,6 +109,49 @@ def test_out_of_range_position_is_rejected_before_any_io() -> None:
     with pytest.raises(ValueError):
         device.gripper_command(1.5)
     assert gripper.positions == []
+
+
+def test_mock_arm_exposes_the_gripper_channel_its_config_declares() -> None:
+    assert SdkArmConfig(model="A1R", backend="mock", with_gripper=True).gripper_channel is True
+    assert SdkArmConfig(model="A1R", backend="mock", with_gripper=False).gripper_channel is False
+    assert SdkArmConfig(
+        model="A1R", backend="mock", with_gripper=True, gripper_protocol="none"
+    ).gripper_channel is False
+    # MuJoCo's end effector belongs to the SDK simulation, not to this adapter.
+    assert SdkArmConfig(model="A1R", backend="mujoco", with_gripper=True).gripper_channel is False
+
+
+def test_mock_follower_gripper_round_trips_a_commanded_opening() -> None:
+    device = SdkDevice(SdkArmConfig(model="A1R", backend="mock", with_gripper=True))
+    device.connect()
+    try:
+        assert device.snapshot(1.0).gripper == pytest.approx(1.0)
+        device.gripper_command(0.3)
+        assert device.snapshot(1.0).gripper == pytest.approx(0.3)
+    finally:
+        device.close()
+
+
+def test_mock_leader_gripper_stays_read_only_and_sweeps_its_hand() -> None:
+    device = SdkDevice(
+        SdkArmConfig(model="A1L", backend="mock", with_gripper=True, mock_motion=True)
+    )
+    device.connect(leader=True)
+    try:
+        with pytest.raises(RuntimeError, match="read-only"):
+            device.gripper_command(0.5)
+
+        readings = []
+        for _ in range(8):
+            time.sleep(0.06)  # the passive query is throttled to 50 ms
+            readings.append(device.snapshot(1.0).gripper)
+        assert all(0.1 <= value <= 1.0 for value in readings)
+        assert len({round(value, 3) for value in readings}) > 1, (
+            "mock_motion must keep moving the simulated handle, otherwise the "
+            "mirroring path is never exercised"
+        )
+    finally:
+        device.close()
 
 
 def test_sdk_derives_enabled_from_the_feedback_status_nibble() -> None:

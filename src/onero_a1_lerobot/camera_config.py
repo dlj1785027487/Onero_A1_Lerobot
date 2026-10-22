@@ -11,8 +11,8 @@ from pathlib import PurePosixPath
 class UsbCameraConfig:
     backend: str = "usb"
     device: str | None = None
-    width: int = 1600
-    height: int = 1200
+    width: int = 640
+    height: int = 480
     fps: int = 30
     auto_exposure: bool | None = None
     exposure_absolute: int | None = None

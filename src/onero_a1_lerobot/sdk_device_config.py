@@ -50,8 +50,10 @@ class SdkArmConfig:
     backend: str = "can"
     channel: str | None = None
     mounting: str | None = None
-    # CAN attaches the A1 gripper channel and its gravity profile.
-    # mock/mujoco use the gravity profile only, without a gripper channel.
+    # A CAN arm attaches the A1 gripper channel; a mock arm gets an in-memory one,
+    # so a simulated session publishes and accepts exactly the features its config
+    # declares. MuJoCo keeps the gravity profile only: its end effector belongs to
+    # the SDK simulation rather than to this adapter's drivers.
     with_gripper: bool = False
     # Visual tool model on Link7, mirroring the SDK's --gripper-model:
     #   "woan_picker" -> the self-developed Onero gripper mechanism (default)
@@ -99,9 +101,15 @@ class SdkArmConfig:
 
     @property
     def gripper_channel(self) -> bool:
-        """Whether this arm exposes a controllable gripper action feature."""
+        """Whether this arm exposes a controllable gripper action feature.
+
+        Mock arms expose it as well, so ``--simulate`` stands in for a hardware
+        session with the same feature set instead of a narrower one. MuJoCo is
+        excluded: its end effector is the SDK simulation's own, not one of this
+        adapter's gripper drivers.
+        """
         return (
-            self.backend == "can"
+            self.backend in ("can", "mock")
             and self.with_gripper
             and self.gripper_protocol != "none"
         )

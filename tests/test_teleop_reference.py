@@ -13,13 +13,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
-
 from conftest import read_config
+
 from onero_a1_lerobot.arm_mapping import ArmMapper, JointSlewLimiter
 from onero_a1_lerobot.sdk_config import OneroSdkConfig, OneroSdkTeleopConfig
 from onero_a1_lerobot.sdk_device_config import ArmMappingConfig, SdkArmConfig
@@ -29,6 +28,8 @@ SESSION_CONFIGS_WITH_SWITCH = (
     "sdk_single_mirror.json",
     "sdk_left_leader_right_follow.json",
     "sdk_right_leader_left_follow.json",
+    "sdk_left_leader_left_follow.json",
+    "sdk_right_leader_right_follow.json",
     "sdk_dual_joint_follow.json",
     "sdk_dual_joint_follow_cameras.json",
 )
@@ -72,6 +73,26 @@ def test_session_configs_declare_the_type_once(config_dir) -> None:
         assert raw["teleop"]["reference"] in ("relative", "absolute"), name
         for side, mapping in raw["teleop"]["mappings"].items():
             assert "reference" not in mapping, f"{name}: {side} 仍在逐臂声明 reference"
+
+
+def test_dual_arm_configs_default_to_relative(config_dir) -> None:
+    """双臂配置默认增量：启动时从臂留在原处，不会先追到主臂姿态。"""
+    for name in ("sdk_dual_joint_follow.json", "sdk_dual_joint_follow_cameras.json"):
+        assert read_config(config_dir, name)["teleop"]["reference"] == "relative", name
+
+
+def test_reference_flag_overrides_the_config() -> None:
+    """``--reference`` 可在启动时临时切换，不必改 JSON。"""
+    from onero_a1_lerobot.sdk_session import build_session_parser
+
+    parser = build_session_parser()
+    assert parser.parse_args(["--session-config", "x.json"]).reference is None
+    assert (
+        parser.parse_args(["--session-config", "x.json", "--reference", "absolute"]).reference
+        == "absolute"
+    )
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--session-config", "x.json", "--reference", "bogus"])
 
 
 def test_session_configs_load_with_the_declared_type(config_dir) -> None:
@@ -238,11 +259,11 @@ def _full_range_robot(*, follower_pose, leader_pose, **overrides):
     robot._last_gripper = {}
     robot._cache_features()
     robot.get_joint_observation = lambda: {
-        **dict(zip(robot._keys_by_side["right"], follower_pose)),
+        **dict(zip(robot._keys_by_side["right"], follower_pose, strict=False)),
         **{key: 0.0 for key in robot._gripper_key_by_side.values()},
     }
     robot.sent = sent
-    robot.action = dict(zip(robot._feature_keys, leader_pose))
+    robot.action = dict(zip(robot._feature_keys, leader_pose, strict=False))
     return robot
 
 
@@ -295,10 +316,31 @@ def test_the_guard_is_scoped_to_the_first_command() -> None:
     robot = _full_range_robot(follower_pose=follower, leader_pose=np.zeros(7))
     robot.send_action(robot.action)
 
-    robot.action = dict(zip(robot._feature_keys, np.full(7, 0.4)))
+    robot.action = dict(zip(robot._feature_keys, np.full(7, 0.4), strict=False))
     robot.send_action(robot.action)  # 超过 0.15 但已不是首帧
 
     assert len(robot.sent) == 2
+
+
+def test_the_tracking_guard_names_the_joints_that_are_behind() -> None:
+    """跟踪误差保护同样要逐关节给出目标/实测/差值。
+
+    放大 startup_max_delta_rad 之后，从臂就是靠这条检查被牵引到主臂位姿的，
+    所以"哪个关节落后多少"是区分被挡住和阈值过紧的唯一依据。
+    """
+    robot = _full_range_robot(follower_pose=np.zeros(7), leader_pose=np.zeros(7))
+    robot.send_action(robot.action)  # 消耗掉只作用于首帧的启动保护
+
+    # 限幅器已经跑到实测位姿之外（从臂被挡住或跟不上），超过默认 0.5 rad。
+    robot._limiters["right"].position = np.full(7, 1.0)
+    with pytest.raises(RuntimeError) as info:
+        robot.send_action(robot.action)
+
+    message = str(info.value)
+    assert "follower tracking error exceeds 0.5000 rad" in message
+    assert "J1 target=+1.0000 follower=+0.0000 delta=+1.0000" in message
+    assert robot._fault == message, "跟踪误差同样必须锁存故障并保位"
+    assert len(robot.sent) == 1, "越限的那一帧不能发出任何指令"
 
 
 # --------------------------------------------------------------------------- #

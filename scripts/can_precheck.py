@@ -36,8 +36,8 @@ from onero_sdk.model_registry import get_model
 from onero_sdk.protocol import MotorError
 
 DEFAULT_TIMEOUT = 0.05
-DEFAULT_CHANNELS = [("can4", "A1L", "leader left"), ("can3", "A1R", "leader right"),
-                    ("can2", "A1L", "follower left"), ("can1", "A1R", "follower right")]
+DEFAULT_CHANNELS = [("can1", "A1L", "leader left"), ("can2", "A1R", "leader right"),
+                    ("can3", "A1L", "follower left"), ("can4", "A1R", "follower right")]
 SLCAN_SETTLE_S = 0.5  # USB CDC-ACM 适配器枚举后需要一点时间才能稳定收发
 WATCH_MIN_DELTA_RAD = 0.02  # 判定"这个关节被转动过"的最小角度变化
 

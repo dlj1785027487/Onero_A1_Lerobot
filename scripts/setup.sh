@@ -7,7 +7,8 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VENV="${A1_LEROBOT_VENV:-$HOME/.venvs/a1-lerobot}"
-SDK_SOURCE="${A1_ARM_SDK_PATH:-$PROJECT_DIR/../armsdk}"
+# armsdk 默认从 PyPI 安装；只有显式设置 A1_ARM_SDK_PATH 时才改用本地源码目录。
+SDK_SOURCE="${A1_ARM_SDK_PATH:-}"
 PIP_NETWORK_OPTS=(--timeout 120 --retries 3)
 # torch 轮子源：x86_64 与 aarch64 的 PyPI Linux 轮子都绑定 CUDA（会额外拉
 # 1GB+ 的 nvidia-cuda 依赖，arm64 开发板用不上），统一用官方 CPU 源。
@@ -42,6 +43,8 @@ case "${ARCH}" in
             'pandas>=2,<3' 'pyarrow>=21,<30' 'jsonlines>=4,<5' 'av>=15,<16')
         ;;
 esac
+# 默认从 PyPI 解析 armsdk，版本区间与 pyproject.toml 的 sdk / sdk-sim extra 一致。
+SDK_SPEC="onero-sdk[${SDK_EXTRAS}]>=0.3,<0.4"
 INSTALL_RECORD=1
 
 usage() {
@@ -49,13 +52,14 @@ usage() {
 用法: bash scripts/setup.sh [--base]
 
 一键创建或复用虚拟环境，默认安装：
-  - 本地 armsdk、Pinocchio（CAN 拖动所需动力学）
+  - armsdk（PyPI 上的 onero-sdk）、Pinocchio（CAN 拖动所需动力学）
   - python-can、pyserial（直连 SLCAN）
   - Onero A1 LeRobot 适配器
   - LeRobot 0.6.1 录制依赖（含 PyAV 视频编码、torchcodec 视频解码）
   - CPU 版 PyTorch；系统 ffmpeg（torchcodec 解码所需，缺少时用 apt 安装）
 
-x86_64 主机另装 MuJoCo 3.12.0（SDK 仿真）、rerun/foxglove 可视化与训练依赖。
+x86_64 主机另装 MuJoCo 3.12.0（SDK 仿真）、离线看数据集（lerobot-dataset-viz
++ rerun/foxglove）与训练（lerobot-train + wandb/accelerate）依赖。
 arm64 开发板自动精简：只装遥操与数据采集所需，不装 MuJoCo / viz / training。
 arm64 的录制依赖按 lerobot 的 dataset extra 手工补齐（datasets / pandas /
 pyarrow / jsonlines / av），只跳过绑定 CUDA 的 torchcodec，视频编解码走 PyAV。
@@ -70,7 +74,7 @@ pyarrow / jsonlines / av），只跳过绑定 CUDA 的 torchcodec，视频编解
 
 可选环境变量：
   A1_LEROBOT_VENV    虚拟环境位置（默认 ~/.venvs/a1-lerobot）
-  A1_ARM_SDK_PATH    SDK 源码（默认本项目相邻的 armsdk）
+  A1_ARM_SDK_PATH    可选：改用该目录下的本地 SDK 源码（默认从 PyPI 安装）
   A1_LEROBOT_PYTHON  指定 Python 解释器（默认自动挑选 3.12+）
   A1_TORCH_INDEX_URL torch 轮子源；默认官方 CPU 源（x86_64 与 aarch64 的
                      PyPI Linux 轮子均绑定 CUDA），置空强制用 PyPI 默认源
@@ -210,7 +214,8 @@ cat <<'EOF'
 安装范围说明：
   - 所有 Python 包均装入虚拟环境（venv 隔离），不改系统 Python，
     不向系统或用户级 site-packages 写任何包
-  - armsdk 安装为源码快照副本，不修改 armsdk 源项目文件
+  - armsdk 默认从 PyPI 安装（onero-sdk）；设置 A1_ARM_SDK_PATH 时改用
+    本地源码快照副本，两种方式都不修改 armsdk 源项目文件
   - 已有 venv 的 Python 不满足本次安装时会删除该 venv 并重建
     （venv 内原有包需重新安装）；满足时只复用，不动现有环境
   - 不创建、不修改任何 CAN 接口或其配置；机械臂现有 CAN 配置保持原样，
@@ -219,10 +224,15 @@ cat <<'EOF'
     （系统工具包，与 Python 环境无关）
 EOF
 
-printf '[1/5] 检查本地 SDK\n'
-[[ -f "$SDK_SOURCE/pyproject.toml" && -d "$SDK_SOURCE/onero_sdk" ]] \
-    || die "未找到 armsdk：$SDK_SOURCE；可用 A1_ARM_SDK_PATH 指定。"
-printf '  SDK 源码：%s\n' "$SDK_SOURCE"
+if [[ -n "$SDK_SOURCE" ]]; then
+    printf '[1/5] 检查本地 SDK 源码\n'
+    [[ -f "$SDK_SOURCE/pyproject.toml" && -d "$SDK_SOURCE/onero_sdk" ]] \
+        || die "A1_ARM_SDK_PATH 指向的目录不是 armsdk 源码：$SDK_SOURCE"
+    printf '  SDK 源码：%s（A1_ARM_SDK_PATH）\n' "$SDK_SOURCE"
+else
+    printf '[1/5] 使用 PyPI 上的 armsdk\n'
+    printf '  依赖：%s\n' "$SDK_SPEC"
+fi
 
 printf '\n[2/5] 安装缺失的系统依赖\n'
 ensure_system_deps
@@ -234,11 +244,12 @@ ensure_venv
     || die "A1 安装需要 Python >= 3.10。"
 
 printf '\n[4/5] 安装 SDK、动力学、仿真及本项目\n'
-# Build a snapshot in a temporary directory so setuptools does not leave
-# build/ or egg-info files in the independent SDK source project.
-SDK_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onero-sdk-setup.XXXXXX")"
-trap 'rm -rf -- "$SDK_BUILD_DIR"' EXIT
-"$VENV/bin/python" -I - "$SDK_SOURCE" "$SDK_BUILD_DIR/armsdk" <<'PY'
+if [[ -n "$SDK_SOURCE" ]]; then
+    # 本地源码：先拷一份快照再安装，避免 setuptools 在 SDK 源项目里留下
+    # build/ 或 egg-info。
+    SDK_BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onero-sdk-setup.XXXXXX")"
+    trap 'rm -rf -- "$SDK_BUILD_DIR"' EXIT
+    "$VENV/bin/python" -I - "$SDK_SOURCE" "$SDK_BUILD_DIR/armsdk" <<'PY'
 import shutil
 import sys
 
@@ -250,6 +261,10 @@ shutil.copytree(
     ),
 )
 PY
+    SDK_INSTALL_SPEC="$SDK_BUILD_DIR/armsdk[${SDK_EXTRAS}]"
+else
+    SDK_INSTALL_SPEC="$SDK_SPEC"
+fi
 if ((INSTALL_RECORD)); then
     # 先装 CPU 版 torch/torchvision（版本上限与 lerobot 0.6.1 的 torch 约束一致），
     # 后续安装会保留已满足约束的版本，避免从默认源拉取数 GB 的 CUDA 轮子。
@@ -264,16 +279,17 @@ if ((INSTALL_RECORD)); then
     fi
     "$VENV/bin/python" -I -m pip install "${PIP_NETWORK_OPTS[@]}" \
         "${LEROBOT_PKGS[@]}" \
-        "$SDK_BUILD_DIR/armsdk[${SDK_EXTRAS}]" "${MUJOCO_PKGS[@]}" pyserial
+        "$SDK_INSTALL_SPEC" "${MUJOCO_PKGS[@]}" pyserial
 else
     "$VENV/bin/python" -I -m pip install "${PIP_NETWORK_OPTS[@]}" \
         -e "$PROJECT_DIR" \
-        "$SDK_BUILD_DIR/armsdk[${SDK_EXTRAS}]" "${MUJOCO_PKGS[@]}" pyserial
+        "$SDK_INSTALL_SPEC" "${MUJOCO_PKGS[@]}" pyserial
 fi
 
 printf '\n[5/5] 验证安装（不访问 CAN）\n'
 PLATFORM="$PLATFORM" REQUIRE_RECORD="$INSTALL_RECORD" "$VENV/bin/python" -I - <<'PY'
 import importlib.metadata as metadata
+import importlib.util
 import os
 from importlib.resources import files
 
@@ -329,6 +345,27 @@ try:
 
     del LeRobotDataset  # 只验证可导入，不使用
 
+    # 离线看数据集（lerobot-dataset-viz → rerun）与训练（lerobot-train →
+    # wandb/accelerate）只在 x86_64 上随 lerobot[dataset-viz,training] 安装；
+    # arm64 精简环境明确不含，这里跳过并说明，避免用户到用时才发现命令不存在。
+    entry_points = {e.name for e in metadata.entry_points(group="console_scripts")}
+    if SKIP_SIM:
+        print("  离线看数据集 / 训练命令：arm64 精简环境不含（需在 x86_64 主机查看）")
+    else:
+        for command in ("lerobot-dataset-viz", "lerobot-train"):
+            if command not in entry_points:
+                raise SystemExit(
+                    f"ERROR: 缺少 {command} 命令；lerobot 的 dataset-viz / training "
+                    "extra 未装全，离线看数据集或训练会不可用。请重跑 scripts/setup.sh。"
+                )
+        for module in ("rerun", "wandb", "accelerate"):
+            if importlib.util.find_spec(module) is None:
+                raise SystemExit(
+                    f"ERROR: 缺少 {module}（离线看数据集 / 训练依赖），"
+                    "相关功能不可用。请重跑 scripts/setup.sh。"
+                )
+        print("  离线看数据集(lerobot-dataset-viz/rerun) / 训练(lerobot-train/wandb/accelerate) OK")
+
     path = tempfile.mktemp(suffix=".mp4")
     with av.open(path, "w") as container:
         stream = container.add_stream("libx264", rate=10)
@@ -371,10 +408,16 @@ except ImportError as exc:
     print(f"  跳过录制与视频依赖检查（未安装：{exc.name}）")
 PY
 printf '\n安装完成。虚拟环境：%s\n' "$VENV"
-printf 'SDK 安装为当前源码快照；SDK 更新后重新运行本命令。\n'
+if [[ -n "$SDK_SOURCE" ]]; then
+    printf 'SDK 安装为本地源码快照（%s）；SDK 更新后重新运行本命令。\n' "$SDK_SOURCE"
+else
+    printf 'SDK 从 PyPI 安装（%s）；升级 SDK 时重新运行本命令。\n' "$SDK_SPEC"
+fi
 if [[ "$PLATFORM" == arm64 ]]; then
     printf '\narm64 精简环境：CPU 版 PyTorch，不含 MuJoCo 仿真、rerun/foxglove 可视化、训练依赖与 torchcodec。\n'
-    printf '录制/回放视频走 PyAV；无硬件自检仍可用 --simulate（内存模拟）；数据集建议拷回 x86 主机用 scripts/viz.sh 查看。\n'
+    printf '录制/回放视频走 PyAV；无硬件自检仍可用 --simulate（内存模拟）。\n'
+    printf '因此 scripts/viz.sh（离线看数据集）与 lerobot-train（训练）在本机不可用：\n'
+    printf '把数据集目录拷到 x86_64 主机，在那台机器上重跑 setup.sh 后使用。\n'
 fi
 printf '\n每次使用前执行：\n'
 printf '  cd %q\n' "$PROJECT_DIR"
@@ -394,4 +437,4 @@ else
     printf '\n确认配置中的 CAN 通道和安装方向后运行真机：\n'
     printf '  onero-a1-lerobot-teleoperate --session-config configs/sdk_left_leader_right_follow.json\n'
 fi
-printf '\n部署与使用详见 docs/usage_sdk_follow.md。\n'
+printf '\n部署与使用详见 docs/usage.md。\n'

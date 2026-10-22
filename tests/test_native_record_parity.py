@@ -7,8 +7,8 @@
 - 自研管线固定 ``h264``（GOP=帧率、crf=23、preset=ultrafast、
   ``tune=zerolatency``、``bf=0``）。
 
-两份配置的机械臂接线、相机和编码参数必须逐项相同；只有已写入
-``docs/usage_sdk_follow.md`` 的四处结构性差异允许保留：``type`` 字段、遥操类型的声明位置
+两份配置的机械臂接线、相机和编码参数必须逐项相同；只有以下四处结构性差异允许保留：
+``type`` 字段、遥操类型的声明位置
 （自研路径用会话级 ``teleop.reference``，原生路径逐臂写 ``reference``）、
 ``robot.bootstrap_relative_follow``，以及录制配置的 ``dataset`` 段。
 """

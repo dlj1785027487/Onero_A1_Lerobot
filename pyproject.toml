@@ -46,7 +46,6 @@ dev = [
 
 [project.scripts]
 onero-a1-print-observation = "onero_a1_lerobot.cli.print_observation:main"
-onero-a1-record-episode = "onero_a1_lerobot.cli.record_episode:main"
 onero-a1-replay-episode = "onero_a1_lerobot.cli.replay_episode:main"
 onero-a1-lerobot-record = "onero_a1_lerobot.cli.lerobot_record:main"
 onero-a1-lerobot-rollout = "onero_a1_lerobot.cli.lerobot_rollout:main"

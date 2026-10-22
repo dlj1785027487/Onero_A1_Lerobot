@@ -21,6 +21,11 @@ _GRIPPER_TOLERANCE = 0.03
 _SETTLE_TIME_S = 0.25
 _JOINT_STABILITY_RAD = 0.005
 _GRIPPER_STABILITY = 0.01
+# Arrival gate for the smooth start-pose transition, in radians. See
+# resolve_align_tolerance(): it is deliberately not robot.startup_max_delta_rad,
+# which is widened on the dual-arm configs to let full-range (absolute) mapping
+# slew the follower onto the leader at startup.
+_ALIGN_TOLERANCE_RAD = 0.15
 
 
 def _duration_for_delta(delta, velocity, acceleration) -> float:
@@ -30,6 +35,21 @@ def _duration_for_delta(delta, velocity, acceleration) -> float:
         float(np.max(_PEAK_BLEND_VELOCITY * distance / velocity)),
         float(np.max(np.sqrt(_PEAK_BLEND_ACCELERATION * distance / acceleration))),
     )
+
+
+def resolve_align_tolerance(robot, joint_tolerance_rad: float | None = None) -> float:
+    """Arrival gate for the start-pose transition, in radians.
+
+    This is not ``robot.startup_max_delta_rad``: that guard is deliberately
+    widened so full-range (absolute) mapping can slew the follower onto the
+    leader at startup, and inheriting a widened value here would accept an arm
+    that stalled half way as "aligned". An explicit value can tighten the gate,
+    and the session guard stays the upper bound, so widening the guard for
+    startup never loosens this gate either.
+    """
+    cap = float(robot.config.startup_max_delta_rad)
+    tolerance = _ALIGN_TOLERANCE_RAD if joint_tolerance_rad is None else float(joint_tolerance_rad)
+    return min(tolerance, cap)
 
 
 def align_to_first_frame(
@@ -112,12 +132,8 @@ def align_to_first_frame(
         if not math.isfinite(duration):
             raise ValueError("Replay alignment duration is not finite; check the configured limits")
 
-        # Use the same admissible distance as the recorded first-frame guard.
-        # An explicit option may tighten it, but cannot bypass that guard.
         # Tracking-error protection remains active inside every send_action.
-        tolerance = robot.config.startup_max_delta_rad
-        if joint_tolerance_rad is not None:
-            tolerance = min(joint_tolerance_rad, tolerance)
+        tolerance = resolve_align_tolerance(robot, joint_tolerance_rad)
         stable_joint_range = min(_JOINT_STABILITY_RAD, tolerance * 0.25)
         period = 1.0 / robot.config.control_hz
         logger.info(

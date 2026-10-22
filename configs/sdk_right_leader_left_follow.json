@@ -5,7 +5,7 @@
       "left": {
         "model": "A1L",
         "backend": "can",
-        "channel": "can2",
+        "channel": "can3",
         "mounting": "humanoid_left",
         "with_gripper": true,
         "gripper_model": "woan_picker",
@@ -53,7 +53,7 @@
       "right": {
         "model": "A1R",
         "backend": "can",
-        "channel": "can1",
+        "channel": "can2",
         "mounting": "humanoid_right",
         "with_gripper": true,
         "handle_open_code": 29385,

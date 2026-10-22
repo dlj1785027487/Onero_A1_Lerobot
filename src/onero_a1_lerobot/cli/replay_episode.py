@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--align-max-velocity", type=float, default=0.2, help="Alignment joint velocity cap in rad/s (default: 0.2)")
     parser.add_argument("--align-max-acceleration", type=float, default=0.5, help="Alignment joint acceleration cap in rad/s^2 (default: 0.5)")
     parser.add_argument("--align-timeout", type=float, default=15.0, help="Extra time in seconds to settle after the planned transition (default: 15)")
-    parser.add_argument("--align-tolerance", type=float, default=None, help="Alignment feedback tolerance in radians (defaults to robot.startup_max_delta_rad; cannot exceed it)")
+    parser.add_argument("--align-tolerance", type=float, default=None, help="Alignment feedback tolerance in radians (default: 0.15; never looser than robot.startup_max_delta_rad)")
     args = parser.parse_args()
     if args.episode < 0:
         parser.error("--episode must be nonnegative")
@@ -43,6 +43,53 @@ def parse_args() -> argparse.Namespace:
         if value is not None and (not math.isfinite(value) or value <= 0):
             parser.error(f"--{name.replace('_', '-')} must be finite and positive")
     return args
+
+
+# The optional per-side gripper column is the only action feature a dataset and a
+# session config may disagree on. ``gripper_channel`` needs a real CAN gripper, so
+# a ``--simulate`` run -- and any config with ``with_gripper=false`` -- has no
+# gripper feature at all, while the datasets this project records on hardware do.
+# Recorded data is replayed with that column dropped, and a dataset without it
+# drives a gripper-equipped follower with the opening it already holds. Every
+# other name, and the order, must still match exactly.
+_GRIPPER_FEATURE_SUFFIX = ".gripper.pos"
+
+
+def _action_columns(dataset_names, robot_keys) -> tuple[list[int], list[str]]:
+    """Pair recorded action columns with the configured follower features.
+
+    Returns the dataset column indices to read for each frame, in follower order,
+    plus the follower gripper keys the dataset does not record.
+    """
+    dataset_names = [str(name) for name in dataset_names or ()]
+    robot_keys = [str(key) for key in robot_keys]
+    if not dataset_names:
+        raise SystemExit(
+            "Dataset action features are unnamed, so they cannot be matched against "
+            "the configured SDK followers"
+        )
+    recorded = set(dataset_names)
+    absent = [key for key in robot_keys if key not in recorded]
+    for key in absent:
+        if not key.endswith(_GRIPPER_FEATURE_SUFFIX):
+            raise SystemExit(
+                f"Dataset action columns do not record {key}, which the configured "
+                "followers require; only the optional gripper column may be absent"
+            )
+    kept = [name for name in dataset_names if name in set(robot_keys)]
+    if kept != [key for key in robot_keys if key not in set(absent)]:
+        raise SystemExit(
+            "Dataset action names/order do not match the configured SDK followers: "
+            f"dataset={dataset_names}, followers={robot_keys}"
+        )
+    for name in (name for name in dataset_names if name not in set(robot_keys)):
+        if not name.endswith(_GRIPPER_FEATURE_SUFFIX):
+            raise SystemExit(
+                f"Dataset action column {name} has no matching follower feature; only "
+                "the optional gripper column may differ"
+            )
+    columns = [index for index, name in enumerate(dataset_names) if name in set(robot_keys)]
+    return columns, absent
 
 
 def _frame_action(values, names, index: int) -> dict[str, float]:
@@ -87,17 +134,35 @@ def main() -> None:
     )
     if ACTION not in dataset.features:
         raise SystemExit(f"ERROR: Dataset {args.repo_id} does not contain action features.")
-    action_names = dataset.features[ACTION].get("names")
-    if tuple(action_names or ()) != tuple(robot.action_features):
-        raise SystemExit("Dataset action names/order do not match the configured SDK followers")
+    action_names = list(dataset.features[ACTION].get("names") or ())
+    columns, held_gripper_keys = _action_columns(action_names, robot.action_features)
+    played_names = [action_names[index] for index in columns]
+    if len(columns) != len(action_names):
+        _logger.warning(
+            "Dataset %s records %s, which the configured followers have no gripper "
+            "channel for; replaying its other %d action columns",
+            args.repo_id,
+            ", ".join(name for name in action_names if name not in set(played_names)),
+            len(played_names),
+        )
+    if held_gripper_keys:
+        _logger.warning(
+            "Dataset %s does not record %s; the follower gripper keeps the opening it "
+            "already holds for the whole episode",
+            args.repo_id, ", ".join(held_gripper_keys),
+        )
     if dataset.num_frames <= 0:
         raise SystemExit("The selected episode has no frames to replay")
     # Read action columns only: decoding both recorded videos inside the CAN
     # loop adds latency even though playback never consumes camera frames.
     actions = dataset.select_columns([ACTION])
+
     # Materialize and validate frame zero before any arm is enabled. Reuse it
     # for both alignment and playback, without reading live camera images.
-    first_action = _frame_action(actions[0][ACTION], action_names, 0)
+    def frame_action(values, index: int) -> dict[str, float]:
+        return _frame_action([values[column] for column in columns], played_names, index)
+
+    first_action = frame_action(actions[0][ACTION], 0)
     fps = args.fps if args.fps is not None else dataset.fps
     if not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
         raise SystemExit("Dataset fps must be finite and positive")
@@ -108,6 +173,13 @@ def main() -> None:
     )
     _logger.info("Connecting enables follower arms; exiting disables them")
     with robot:
+        held_opening: dict[str, float] = {}
+        if held_gripper_keys:
+            # Latched before aligning: the alignment target must contain every
+            # configured follower feature.
+            observed = robot.get_joint_observation()
+            held_opening = {key: float(observed[key]) for key in held_gripper_keys}
+            first_action = {**first_action, **held_opening}
         if not args.no_align:
             align_to_first_frame(
                 robot, first_action, minimum_duration_s=args.align_duration,
@@ -116,7 +188,9 @@ def main() -> None:
             )
         for i in range(dataset.num_frames):
             start = time.perf_counter()
-            action = first_action if i == 0 else _frame_action(actions[i][ACTION], action_names, i)
+            action = first_action if i == 0 else {
+                **frame_action(actions[i][ACTION], i), **held_opening,
+            }
             robot.send_action(action)
             if i % max(1, int(fps)) == 0 or i == dataset.num_frames - 1:
                 _logger.info("Replayed frame %d/%d", i + 1, dataset.num_frames)

@@ -5,7 +5,7 @@
       "right": {
         "model": "A1R",
         "backend": "can",
-        "channel": "can2",
+        "channel": "can4",
         "mounting": "humanoid_right",
         "with_gripper": true,
         "gripper_model": "woan_picker",

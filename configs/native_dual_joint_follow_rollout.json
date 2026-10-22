@@ -1,0 +1,83 @@
+{
+  "robot": {
+    "type": "onero_sdk",
+    "id": "external_dual_followers",
+    "arms": {
+      "left": {
+        "model": "A1L",
+        "backend": "can",
+        "channel": "can3",
+        "mounting": "humanoid_left",
+        "with_gripper": true,
+        "gripper_model": "woan_picker",
+        "gripper_protocol": "onero"
+      },
+      "right": {
+        "model": "A1R",
+        "backend": "can",
+        "channel": "can4",
+        "mounting": "humanoid_right",
+        "with_gripper": true,
+        "gripper_model": "woan_picker",
+        "gripper_protocol": "onero"
+      }
+    },
+    "send_action": true,
+    "control_hz": 200,
+    "max_velocity": [
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      3.0
+    ],
+    "max_acceleration": [
+      80.0,
+      80.0,
+      80.0,
+      80.0,
+      80.0,
+      80.0,
+      80.0
+    ],
+    "continuous_follow": true,
+    "clip_joint_limits": false,
+    "startup_max_delta_rad": 3.0,
+    "max_control_gap_s": 1.0,
+    "stale_state_s": 1.0,
+    "isolate_can_processes": true,
+    "control_cpu_affinity": "auto",
+    "velocity_feedforward_scale": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "bootstrap_relative_follow": false,
+    "cameras": {
+      "left_wrist": {
+        "backend": "usb",
+        "device": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:2:1.0-video-index0",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "auto_exposure": false,
+        "exposure_absolute": 200
+      },
+      "right_wrist": {
+        "backend": "usb",
+        "device": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:3:1.0-video-index0",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "auto_exposure": false,
+        "exposure_absolute": 200
+      }
+    }
+  }
+}

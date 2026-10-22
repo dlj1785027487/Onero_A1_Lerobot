@@ -670,7 +670,7 @@ class SdkSession:
                     self.recorder.close()
 
 
-def run_session_cli(argv: list[str], *, record: bool = False) -> None:
+def build_session_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="CAN SDK leader/follower session (one or two arms)"
     )
@@ -693,17 +693,31 @@ def run_session_cli(argv: list[str], *, record: bool = False) -> None:
         "--diagnostics-interval", type=float, default=None, metavar="SECONDS",
         help="Log leader, mapped/limited targets and follower feedback every SECONDS (no recording)",
     )
+    parser.add_argument(
+        "--reference",
+        choices=("absolute", "relative"),
+        default=None,
+        help="Override teleop.reference for this run; omit to keep the session config",
+    )
     recording = parser.add_mutually_exclusive_group()
     recording.add_argument("--record", dest="record", action="store_true", default=None)
     recording.add_argument("--no-record", dest="record", action="store_false")
     parser.add_argument("--repo-id")
     parser.add_argument("--task")
     parser.add_argument("--root", help="Exact LeRobot dataset directory")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def run_session_cli(argv: list[str], *, record: bool = False) -> None:
+    args = build_session_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", force=True
     )
     config = load_session_config(args.session_config, simulate=args.simulate)
+    if args.reference is not None:
+        # Applied before validate() so the session-level value is propagated to
+        # every mapping exactly like the JSON field.
+        config.teleop.reference = args.reference
     if args.duration is not None or args.diagnostics_interval is not None:
         from .sdk_config import positive
 

@@ -17,10 +17,10 @@ import pytest
 MODULE_PATH = Path(__file__).resolve().parent.parent / "scripts" / "can_precheck.py"
 
 EXPECTED_TARGETS = [
-    ("can4", "A1L", "leader left"),
-    ("can3", "A1R", "leader right"),
-    ("can2", "A1L", "follower left"),
-    ("can1", "A1R", "follower right"),
+    ("can1", "A1L", "leader left"),
+    ("can2", "A1R", "leader right"),
+    ("can3", "A1L", "follower left"),
+    ("can4", "A1R", "follower right"),
 ]
 
 
@@ -188,18 +188,18 @@ def test_watch_reports_the_moved_joints(precheck, monkeypatch, capsys):
     monkeypatch.setattr(precheck, "open_backend", lambda *a, **k: FakeBackend())
     monkeypatch.setattr(precheck, "get_model", lambda _name: SimpleNamespace(joints=[object()]))
 
-    precheck.watch("can4", "A1L", "leader left", 0.05, 0.0)
+    precheck.watch("can1", "A1L", "leader left", 0.05, 0.0)
     output = capsys.readouterr().out
-    assert "can4 (A1L, leader left)" in output
+    assert "can1 (A1L, leader left)" in output
     assert "J1 变化 1.500 rad" in output
 
 
 def test_watch_option_runs_on_every_target(precheck, monkeypatch):
     calls = []
     monkeypatch.setattr(precheck, "watch", lambda *args: calls.append(args))
-    monkeypatch.setattr(sys, "argv", ["can_precheck.py", "--watch", "3", "can1"])
+    monkeypatch.setattr(sys, "argv", ["can_precheck.py", "--watch", "3", "can4"])
     assert precheck.main() == 0
-    assert calls == [("can1", "A1R", "follower right", 3.0, precheck.DEFAULT_TIMEOUT)]
+    assert calls == [("can4", "A1R", "follower right", 3.0, precheck.DEFAULT_TIMEOUT)]
 
 
 def test_nonpositive_watch_seconds_are_rejected(precheck, monkeypatch):

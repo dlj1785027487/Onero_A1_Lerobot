@@ -8,12 +8,14 @@ SESSION_CONFIGS = (
     "sdk_single_mirror.json",
     "sdk_left_leader_right_follow.json",
     "sdk_right_leader_left_follow.json",
+    "sdk_left_leader_left_follow.json",
+    "sdk_right_leader_right_follow.json",
     "sdk_dual_joint_follow.json",
     "sdk_dual_joint_follow_cameras.json",
 )
 
-EXPECTED_LEADER_CHANNELS = {"left": "can4", "right": "can3"}
-EXPECTED_FOLLOWER_CHANNELS = {"left": "can2", "right": "can1"}
+EXPECTED_LEADER_CHANNELS = {"left": "can1", "right": "can2"}
+EXPECTED_FOLLOWER_CHANNELS = {"left": "can3", "right": "can4"}
 
 
 def test_session_configs_use_only_the_documented_top_level_keys(config_dir):
@@ -33,7 +35,7 @@ def test_session_configs_load_and_validate_without_hardware(config_dir):
 
 
 def test_simulate_turns_camera_configs_into_usable_mocks(config_dir):
-    """docs/usage_usb_cameras.md 明确支持 --simulate + 相机配置。"""
+    """docs/usage.md 明确支持 --simulate + 相机配置。"""
     from onero_a1_lerobot.sdk_session import load_session_config
 
     config = load_session_config(config_dir / "sdk_dual_joint_follow_cameras.json", simulate="mock")
@@ -44,17 +46,30 @@ def test_simulate_turns_camera_configs_into_usable_mocks(config_dir):
         # V4L2 曝光控制在合成图像上没有意义，mock 相机会拒绝它们。
         assert camera.auto_exposure is None
         assert camera.exposure_absolute is None
-        assert (camera.width, camera.height, camera.fps) == (1600, 1200, 30)
+        assert (camera.width, camera.height, camera.fps) == (640, 480, 30)
 
 
 def test_dual_arm_configs_drive_the_deployed_can_wiring(config_dir):
-    """双臂配置的通道必须与现场接线一致（见 docs/usage_sdk_follow.md）。"""
+    """双臂配置的通道必须与现场接线一致（见 docs/usage.md）。"""
     for name in ("sdk_dual_joint_follow.json", "sdk_dual_joint_follow_cameras.json"):
         config = read_config(config_dir, name)
         leaders = {side: arm["channel"] for side, arm in config["teleop"]["arms"].items()}
         followers = {side: arm["channel"] for side, arm in config["robot"]["arms"].items()}
         assert leaders == EXPECTED_LEADER_CHANNELS
         assert followers == EXPECTED_FOLLOWER_CHANNELS
+
+
+def test_every_session_config_uses_the_fixed_can_wiring(config_dir):
+    """单臂配置也必须沿用现场四条臂的接口分配（见 docs/usage.md 第 2 章）。
+
+    文档承诺"接好线后不用改配置就能启动"，这条用例保证这个承诺。
+    """
+    for name in SESSION_CONFIGS:
+        config = read_config(config_dir, name)
+        for side, arm in config["teleop"]["arms"].items():
+            assert arm["channel"] == EXPECTED_LEADER_CHANNELS[side], f"{name}: leader {side}"
+        for side, arm in config["robot"]["arms"].items():
+            assert arm["channel"] == EXPECTED_FOLLOWER_CHANNELS[side], f"{name}: follower {side}"
 
 
 def test_camera_config_differs_from_the_dual_config_only_by_cameras(config_dir):
@@ -82,7 +97,7 @@ def test_camera_config_declares_two_wrist_cameras(config_dir):
     assert set(cameras) == {"left_wrist", "right_wrist"}
     for camera in cameras.values():
         assert camera["backend"] == "usb"
-        assert (camera["width"], camera["height"], camera["fps"]) == (1600, 1200, 30)
+        assert (camera["width"], camera["height"], camera["fps"]) == (640, 480, 30)
 
 
 def test_session_recording_section_rejects_an_unknown_encoder():

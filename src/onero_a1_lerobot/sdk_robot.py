@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections.abc import Callable
 from functools import partial
@@ -49,6 +50,7 @@ class OneroSdk(Robot):
         self.last_command_velocities: dict[str, list[float]] = {}
         self._command_frame = 0
         self._last_gripper: dict[str, tuple[float | None, float]] = {}
+        self._gripper_clamp_reported: set[str] = set()
         self._cache_features()
 
     def _cache_features(self) -> None:
@@ -218,6 +220,7 @@ class OneroSdk(Robot):
         self._last_send = None
         self._first_send = True
         self._last_gripper.clear()
+        self._gripper_clamp_reported.clear()
 
     def _bootstrap_follower_target(
         self, side: str, target: np.ndarray, measured: np.ndarray,
@@ -354,7 +357,23 @@ class OneroSdk(Robot):
                     and np.max(abs(expected - measured))
                     > self.config.max_tracking_error_rad
                 ):
-                    raise RuntimeError(f"{side} follower tracking error exceeds configured limit")
+                    # Name the joints like the first-command guard does: after a
+                    # widened startup_max_delta_rad the follower is slewed onto
+                    # the leader through this check, so "which joint is behind"
+                    # is the only thing that separates a blocked arm from a
+                    # limit that is simply set too tight.
+                    behind = np.flatnonzero(
+                        abs(expected - measured) > self.config.max_tracking_error_rad
+                    )
+                    details = "; ".join(
+                        f"J{i + 1} target={expected[i]:+.4f} follower={measured[i]:+.4f} "
+                        f"delta={expected[i] - measured[i]:+.4f}"
+                        for i in behind
+                    )
+                    raise RuntimeError(
+                        f"{side} ({self.config.arms[side].model}) follower tracking error "
+                        f"exceeds {self.config.max_tracking_error_rad:.4f} rad: {details}"
+                    )
                 targets[side] = target
             commands = {}
             for side, q in targets.items():
@@ -456,10 +475,29 @@ class OneroSdk(Robot):
             raise error
 
     def _send_gripper_commands(self, normalized: dict[str, float]) -> None:
-        """Forward gripper targets, rate-limited because transactions block."""
+        """Forward gripper targets, rate-limited because transactions block.
+
+        The channel is a physical opening in [0, 1] (1.0 = fully open). A policy
+        target just outside that range -- the unnormalizer overshooting a recorded
+        range whose maximum sits exactly on the boundary -- is clamped instead of
+        rejected, the same way the SDK's own position path clips joint commands.
+        Non-finite values still reach the SDK and fail with its own error.
+        """
         now = time.monotonic()
         for side, key in self._gripper_key_by_side.items():
-            target = normalized[key]
+            requested = float(normalized[key])
+            target = (
+                requested
+                if not math.isfinite(requested)
+                else min(1.0, max(0.0, requested))
+            )
+            if target != requested and side not in self._gripper_clamp_reported:
+                self._gripper_clamp_reported.add(side)
+                logger.warning(
+                    "Gripper target on %s (%s) was %.4f; clamped to the [0, 1] "
+                    "opening range (1.0 = fully open)",
+                    side, self.config.arms[side].model, requested,
+                )
             last_value, last_time = self._last_gripper.get(side, (None, 0.0))
             if (
                 last_value is not None

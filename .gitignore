@@ -20,3 +20,7 @@ checkpoints/
 
 # This is a reusable library; applications may generate their own lock file.
 uv.lock
+
+# Local demo video sources; the encoded copies live in the docs site repository.
+demo_vedios/
+demo_vedios.zip

@@ -38,9 +38,12 @@ def _is_slcan_channel(channel: str | None) -> bool:
 # The SDK verifies all seven motor states before it enables anything, with one
 # un-retried feedback query per motor and a 50 ms deadline. A single lost CAN
 # frame therefore aborts the whole connect -- measured on slcan/CANable links as
-# a several-percent event while the machine is busy starting up. Nothing has been
-# enabled at that point, so one retry is safe and cannot leave a half-enabled arm.
-_CONNECT_ATTEMPTS = 2
+# a several-percent event while the machine is busy starting up, and observed to
+# hit the same joint on two consecutive attempts when the link is marginal. Four
+# attempts at 50 ms apart still cost under 0.5 s of startup on a healthy link.
+# Nothing has been enabled during this check, so a retry is safe and cannot leave
+# a half-enabled arm.
+_CONNECT_ATTEMPTS = 4
 _CONNECT_RETRY_DELAY_S = 0.05
 _PRE_ENABLE_STATE_HINT = "before enable"
 
@@ -303,6 +306,69 @@ def _mujoco_backend(config: SdkArmConfig, control_hz: float):
     return InitializedBackend(model_name=config.model, control_dt=1 / control_hz)
 
 
+class _MockGripper:
+    """In-memory gripper for ``backend=mock``.
+
+    Mirrors the slice of the SDK end-effector interface that ``SdkDevice`` drives
+    -- a passive status query, a normalized opening in [0, 1], enable/disable --
+    so a simulated session publishes and accepts exactly the features its config
+    declares, the gripper channel included. A follower's measured opening follows
+    its last command, which exercises the whole gripper path; a leader stays
+    read-only, like the hand-moved handle it stands in for, and with
+    ``mock_motion`` its opening sweeps on its own so the mirroring path runs
+    without an operator touching anything.
+    """
+
+    def __init__(self, config: SdkArmConfig, *, leader: bool, opening: float = 1.0) -> None:
+        self.config = config
+        self._leader = leader
+        self._read_only = leader
+        self._opening = float(opening)
+        self._enabled = False
+        self._started = time.monotonic()
+        self.state = SimpleNamespace(
+            timestamp=0.0, fault_code=None, motion_state=1, opening=self._opening,
+        )
+        self._publish()
+
+    def _publish(self) -> None:
+        self.state.timestamp = time.monotonic()
+        self.state.motion_state = 1
+        self.state.fault_code = None
+        self.state.opening = self._opening
+
+    def enable(self) -> None:
+        self._enabled = True
+        self._publish()
+
+    def disable(self) -> None:
+        self._enabled = False
+        self._publish()
+
+    def refresh(self):
+        """The passive status query; a simulated leader's hand moves slowly."""
+        if self._leader and self.config.mock_motion:
+            phase = time.monotonic() - self._started
+            # Sweep off both endpoints so neither extreme is parked on.
+            self._opening = 0.575 + 0.425 * math.sin(0.7 * phase)
+        self._publish()
+        return self.state
+
+    def set_position(self, position: float) -> None:
+        if self._read_only:
+            raise RuntimeError(
+                "A simulated leader gripper is read-only; no gripper command is sent "
+                "to a leader arm"
+            )
+        if not self._enabled:
+            raise RuntimeError("This simulated gripper is not enabled")
+        self._opening = float(position)
+        self._publish()
+
+    def get_position(self) -> float:
+        return float(self._opening)
+
+
 class SdkDevice:
     def __init__(self, config: SdkArmConfig, *, simulation_control_hz: float = 200):
         self.config = config
@@ -348,8 +414,8 @@ class SdkDevice:
         except ImportError as exc:
             extra = "sim" if self.config.backend == "mujoco" else "dynamics"
             raise RuntimeError(
-                f"Install the local SDK: python3 -m pip install -e '../armsdk[{extra}]' "
-                "(or add ../armsdk to PYTHONPATH for source-tree use)"
+                f"Install the SDK: python3 -m pip install 'onero-sdk[{extra}]>=0.3,<0.4' "
+                "(or point A1_ARM_SDK_PATH at a local source tree during setup)"
             ) from exc
         self._model = get_model(self.config.model)
         if self._model.num_joints != 7:
@@ -442,6 +508,11 @@ class SdkDevice:
         if self.config.backend == "mock":
             self._set_mock(self.config.mock_initial)
             self._held = None
+            if self.config.gripper_channel:
+                # Explicit rather than a silent default, so a config that turns the
+                # channel off cannot keep reporting a gripper feature.
+                self._gripper = _MockGripper(self.config, leader=leader)
+                self._gripper.enable()
             return
         from onero_sdk import Arm
 
